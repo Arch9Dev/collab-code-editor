@@ -2,9 +2,11 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { register, login, verifyToken } from './auth';
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -14,7 +16,32 @@ const io = new Server(httpServer, {
   }
 });
 
-const roomState: Record<string, { code: string; language: string }> = {};
+const roomState: Record<string, { code: string; language: string; owner: string; isLocked: boolean }> = {};
+
+// Auth routes
+app.post('/auth/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    res.status(400).json({ error: 'Username and password are required' });
+    return;
+  }
+  const result = await register(username, password);
+  if (!result) {
+    res.status(409).json({ error: 'Username already taken' });
+    return;
+  }
+  res.json(result);
+});
+
+app.post('/auth/login', async (req, res) => {
+  const { username, password } = req.body;
+  const result = await login(username, password);
+  if (!result) {
+    res.status(401).json({ error: 'Invalid username or password' });
+    return;
+  }
+  res.json(result);
+});
 
 app.get('/', (req, res) => {
   res.send('Server is running');
@@ -23,27 +50,61 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  socket.on('join_room', (roomId) => {
-    socket.join(roomId);
-    console.log(`${socket.id} joined room ${roomId}`);
+  let currentUser: { id: string; username: string; colour: string } | null = null;
 
-    if (roomState[roomId]) {
-      socket.emit('room_state', roomState[roomId]);
+  socket.on('authenticate', (token) => {
+    const user = verifyToken(token);
+    if (user) {
+      currentUser = user;
+      socket.emit('authenticated', user);
+    } else {
+      socket.emit('auth_error', 'Invalid token');
     }
+  });
+
+  socket.on('join_room', (roomId) => {
+    if (!currentUser) {
+      socket.emit('auth_error', 'You must be logged in to join a room');
+      return;
+    }
+
+    socket.join(roomId);
+    console.log(`${currentUser.username} joined room ${roomId}`);
+
+    if (!roomState[roomId]) {
+      roomState[roomId] = { code: '', language: 'javascript', owner: currentUser.username, isLocked: false };
+    }
+
+    socket.emit('room_state', roomState[roomId]);
+    io.to(roomId).emit('room_info', { owner: roomState[roomId].owner, isLocked: roomState[roomId].isLocked });
   });
 
   socket.on('leave_room', (roomId) => {
     socket.leave(roomId);
   });
 
+  socket.on('toggle_lock', (roomId) => {
+    if (!currentUser || !roomState[roomId]) return;
+    if (roomState[roomId].owner !== currentUser.username) {
+      socket.emit('error', 'Only the room owner can lock/unlock the room');
+      return;
+    }
+    roomState[roomId].isLocked = !roomState[roomId].isLocked;
+    io.to(roomId).emit('room_info', { owner: roomState[roomId].owner, isLocked: roomState[roomId].isLocked });
+  });
+
   socket.on('code_update', ({ roomId, code }) => {
-    if (!roomState[roomId]) roomState[roomId] = { code: '', language: 'javascript' };
+    if (!currentUser) return;
+    if (roomState[roomId]?.isLocked && roomState[roomId]?.owner !== currentUser.username) return;
+    if (!roomState[roomId]) roomState[roomId] = { code: '', language: 'javascript', owner: currentUser.username, isLocked: false };
     roomState[roomId].code = code;
     socket.to(roomId).emit('code_update', code);
   });
 
   socket.on('language_update', ({ roomId, language }) => {
-    if (!roomState[roomId]) roomState[roomId] = { code: '', language: 'javascript' };
+    if (!currentUser) return;
+    if (roomState[roomId]?.isLocked && roomState[roomId]?.owner !== currentUser.username) return;
+    if (!roomState[roomId]) roomState[roomId] = { code: '', language: 'javascript', owner: currentUser.username, isLocked: false };
     roomState[roomId].language = language;
     socket.to(roomId).emit('language_update', language);
   });
