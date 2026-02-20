@@ -1,35 +1,32 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [connected, setConnected] = useState(false);
+
+  useEffect(() => {
+    const socket = io('http://localhost:3000', {
+      transports: ['polling', 'websocket']
+    });
+
+    socket.on('connect', () => {
+      console.log('Connected!', socket.id);
+      setConnected(true);
+    });
+    socket.on('connect_error', (err) => {
+      console.log('Connection error:', err.message);
+    });
+    socket.on('disconnect', () => setConnected(false));
+
+    return () => { socket.disconnect(); };
+  }, []);
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div>
+      <h1>Collab Code Editor</h1>
+      <p>Status: {connected ? '🟢 Connected to server' : '🔴 Disconnected'}</p>
+    </div>
+  );
 }
 
-export default App
+export default App;
