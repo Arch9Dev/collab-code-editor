@@ -20,8 +20,17 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
-  socket.on('code_update', (code) => {
-    socket.broadcast.emit('code_update', code);
+  socket.on('join_room', (roomId) => {
+    socket.join(roomId);
+    console.log(`${socket.id} joined room ${roomId}`);
+  });
+
+  socket.on('leave_room', (roomId) => {
+    socket.leave(roomId);
+  });
+
+  socket.on('code_update', ({ roomId, code }) => {
+    socket.to(roomId).emit('code_update', code);
   });
 
   socket.on('disconnect', () => {
