@@ -109,6 +109,16 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('language_update', language);
   });
 
+  socket.on('chat_message', ({ roomId, message }) => {
+  if (!currentUser) return;
+  io.to(roomId).emit('chat_message', {
+    username: currentUser.username,
+    colour: currentUser.colour,
+    message,
+    timestamp: new Date().toLocaleTimeString()
+  });
+});
+
   socket.on('run_code', (({ code, language }) => {
     const { exec } = require('child_process');
     const fs = require('fs');
